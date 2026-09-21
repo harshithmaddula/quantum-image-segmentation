@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quantum Image Segmentation — Pipeline Explained</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Patrick+Hand&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#fdfcf7; --ink:#2b2b2b; --indigo:#3b3b7a; --indigo-soft:#5a5ab0;
+    --formula-bg:#eef0ff; --formula-border:#b9bdf0;
+    --green:#2e7d4f; --green-bg:#eaf7ef; --amber-bg:#fff6e6; --amber-border:#e8c884;
+    --line:#dfe1ea;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.6; font-size:16px;
+    /* faint notebook lines */
+    background-image:linear-gradient(to bottom, transparent 31px, #eceef5 32px);
+    background-size:100% 32px;
+  }
+  .wrap{max-width:980px; margin:0 auto; padding:32px 22px 80px;}
+  h1,h2,h3{font-family:"Caveat","Patrick Hand",cursive; color:var(--indigo); line-height:1.1; margin:0;}
+  h1{font-size:54px;}
+  h2{font-size:38px; margin-top:46px; border-bottom:3px solid var(--indigo-soft); padding-bottom:6px;}
+  h3{font-size:28px; color:var(--indigo-soft);}
+  .subtitle{font-family:"Patrick Hand",cursive; font-size:20px; color:#666; margin-top:4px;}
+  p{margin:10px 0;}
+  code{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace; font-size:0.92em;}
+
+  /* boxes */
+  .box{border-radius:10px; padding:14px 18px; margin:16px 0;}
+  .readme{background:#f3f1ff; border:2px dashed var(--indigo-soft);}
+  .limit{background:var(--amber-bg); border:1px solid var(--amber-border);}
+  .note{background:#f1f6ff; border-left:4px solid var(--indigo-soft);}
+
+  /* formula callout */
+  .formula{
+    background:var(--formula-bg); border:1px solid var(--formula-border);
+    border-radius:8px; padding:12px 16px; margin:12px 0;
+    font-family:"Cambria Math","Georgia",serif; font-size:1.12em; text-align:center;
+    overflow-x:auto;
+  }
+  .formula small{display:block; font-family:inherit; font-size:0.7em; color:#555; margin-top:8px; text-align:left;}
+
+  /* pipeline flow */
+  .flow{display:flex; flex-wrap:wrap; align-items:stretch; gap:8px; justify-content:center; margin:24px 0;}
+  .flow .node{
+    background:#fff; border:2px solid var(--indigo-soft); border-radius:10px;
+    padding:12px 14px; text-align:center; flex:1 1 130px; min-width:120px;
+    box-shadow:2px 2px 0 #d9dcef;
+  }
+  .flow .node b{display:block; color:var(--indigo); font-size:1.05em;}
+  .flow .node span{font-size:0.8em; color:#666;}
+  .flow .arrow{display:flex; align-items:center; font-size:24px; color:var(--indigo-soft);}
+
+  /* two-column stage card */
+  .stage{
+    background:#fff; border:1px solid var(--line); border-radius:12px;
+    margin:22px 0; overflow:hidden; box-shadow:3px 3px 0 #e7e9f3;
+  }
+  .stage .head{background:var(--indigo); color:#fff; padding:10px 18px; font-family:"Patrick Hand",cursive; font-size:1.5em;}
+  .stage .head span{font-size:0.7em; opacity:.85; float:right;}
+  .cols{display:flex; flex-wrap:wrap;}
+  .col{flex:1 1 50%; min-width:280px; padding:16px 20px;}
+  .col.left{border-right:1px dashed var(--line); background:#fcfcff;}
+  .col h4{margin:0 0 6px; color:var(--green); font-size:1em; text-transform:uppercase; letter-spacing:.5px;}
+  .col.right h4{color:var(--indigo-soft);}
+  ul{margin:8px 0; padding-left:20px;}
+  li{margin:5px 0;}
+
+  /* grids for worked example */
+  .grids{display:flex; flex-wrap:wrap; gap:18px; align-items:center; justify-content:center; margin:14px 0;}
+  .grid{display:inline-block; text-align:center;}
+  .grid table{border-collapse:collapse; margin:4px auto;}
+  .grid td{border:1px solid #bbb; width:34px; height:30px; text-align:center; font-size:13px; font-family:monospace;}
+  .grid caption{font-family:"Patrick Hand",cursive; color:var(--indigo-soft); font-size:1.05em; margin-bottom:4px;}
+  .bg{background:#e9edf5;} .fg{background:#ffe9b0;}
+  .gstep{font-size:30px; color:var(--indigo-soft);}
+
+  /* tables */
+  table.data{border-collapse:collapse; width:100%; margin:14px 0; background:#fff;}
+  table.data th,table.data td{border:1px solid var(--line); padding:8px 12px; text-align:left; font-size:0.95em; vertical-align:top;}
+  table.data th{background:var(--indigo); color:#fff; font-family:"Patrick Hand",cursive; font-size:1.1em; font-weight:normal;}
+  table.data tr:nth-child(even){background:#f7f8fd;}
+  .tag{display:inline-block; background:var(--green-bg); color:var(--green); border-radius:5px; padding:1px 8px; font-size:0.85em; font-weight:bold;}
+
+  footer{margin-top:50px; padding-top:18px; border-top:2px solid var(--line); font-size:0.9em; color:#666;}
+  footer a{color:var(--indigo);}
+
+  @media (max-width:640px){
+    h1{font-size:40px;} h2{font-size:30px;}
+    .col.left{border-right:none; border-bottom:1px dashed var(--line);}
+  }
+  @media print{
+    body{background:#fff;}
+    .stage,.flow .node{box-shadow:none;}
+    h2{page-break-before:auto;}
+    .stage{page-break-inside:avoid;}
+    a{color:var(--ink); text-decoration:none;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Quantum Image Segmentation</h1>
+  <div class="subtitle">The complete pipeline, explained from scratch — intuition &amp; formulas side by side</div>
+
+  <div class="box readme">
+    <b>📌 Read me first — the big picture.</b>
+    We take an image and split it into <b>foreground</b> (the object) and
+    <b>background</b>. Instead of doing everything classically, we use
+    <b>quantum circuits</b> for the heavy parts: encoding the image, finding edges,
+    and choosing the best foreground/background labelling. The pipeline has four
+    stages — <b>NEQR → QHED → QUBO → QAOA</b> — and ends with a clean binary mask.
+  </div>
+
+  <!-- ============ THE PROBLEM ============ -->
+  <h2>1 · The Problem (from scratch)</h2>
+  <p><b>Image segmentation</b> means partitioning an image into meaningful regions.
+  The simplest, most useful version is <b>foreground / background separation</b>:
+  decide, for every pixel, "is this part of the object I care about, or not?"
+  The output is a <b>binary mask</b> (1 = foreground, 0 = background).</p>
+  <p><b>Why quantum?</b> Three reasons, each used by one stage of our pipeline:</p>
+  <ul>
+    <li><b>Superposition</b> — one quantum state can hold all pixels at once (used by NEQR).</li>
+    <li><b>Interference</b> — a single Hadamard gate computes all neighbour differences in parallel (used by QHED).</li>
+    <li><b>Quantum optimization</b> — QAOA searches the exponential space of fg/bg labellings (used in the final stage).</li>
+  </ul>
+
+  <!-- ============ QUANTUM 60s ============ -->
+  <h2>2 · Quantum in 60 Seconds</h2>
+  <div class="cols" style="gap:0;">
+    <div class="col left">
+      <h4>Intuition</h4>
+      <ul>
+        <li>A <b>bit</b> is 0 or 1. A <b>qubit</b> can be both at once — a blend.</li>
+        <li>Measuring a qubit gives 0 or 1 with probabilities set by its "blend".</li>
+        <li><b>n qubits</b> represent 2ⁿ states <i>simultaneously</i> — exponential capacity.</li>
+        <li>Gates rotate/flip qubits. We use just a few: H, X, Z, RX, RZ, CNOT.</li>
+      </ul>
+    </div>
+    <div class="col right">
+      <h4>The pieces we use</h4>
+      <div class="formula">|ψ⟩ = α|0⟩ + β|1⟩ ,&nbsp; |α|² + |β|² = 1</div>
+      <ul>
+        <li><b>H</b> (Hadamard): makes a superposition <code>|0⟩→(|0⟩+|1⟩)/√2</code></li>
+        <li><b>X</b>: bit-flip. <b>Z</b>: phase-flip (eigenvalues ±1).</li>
+        <li><b>RX(θ), RZ(θ)</b>: tunable rotations — the QAOA "knobs".</li>
+        <li><b>CNOT</b>: entangles two qubits.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ PIPELINE GLANCE ============ -->
+  <h2>3 · The Pipeline at a Glance</h2>
+  <div class="flow">
+    <div class="node"><b>Image</b><span>pixels f(y,x)</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>NEQR</b><span>encode (lossless)</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>QHED</b><span>edge map</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>QUBO</b><span>energy / graph</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>QAOA</b><span>optimize labels</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>Mask</b><span>fg / bg</span></div>
+  </div>
+  <div class="box note">Each arrow is a real function in <code>quantum_seg/</code>:
+  <code>neqr.py</code> → <code>qsobel.py</code> → <code>superpixel.py</code> → <code>qaoa_seg.py</code>.</div>
+
+  <!-- ============ STAGES ============ -->
+  <h2>4 · The Four Stages</h2>
+
+  <!-- STAGE 1 -->
+  <div class="stage">
+    <div class="head">Stage 1 — NEQR: Quantum Image Encoding <span>neqr.py</span></div>
+    <div class="cols">
+      <div class="col left">
+        <h4>Intuition</h4>
+        <p>Before a quantum computer can process an image, the image must <b>become a
+        quantum state</b>. NEQR stores every pixel's <b>position</b> and <b>brightness</b>
+        as plain 0/1 patterns (basis states), all added together in superposition.</p>
+        <p>Because nothing is approximated, you can decode it back <b>perfectly</b> —
+        like a lossless zip. That's why we say it "preserves spatial information".</p>
+      </div>
+      <div class="col right">
+        <h4>Formula</h4>
+        <div class="formula">
+          |I⟩ = (1/2ⁿ) Σ<sub>y,x</sub> |f(y,x)⟩ ⊗ |y⟩ ⊗ |x⟩
+          <small>
+            |y⟩,|x⟩ = position registers (n qubits each)<br>
+            |f(y,x)⟩ = colour register (q qubits, the pixel value)<br>
+            Total qubits = 2n + q · &nbsp; Gates = O(2<sup>2n</sup>·q)
+          </small>
+        </div>
+        <p><span class="tag">RESULT</span> Lossless ⇒ <b>PSNR = ∞, SSIM = 1.0, MSE = 0</b>.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- STAGE 2 -->
+  <div class="stage">
+    <div class="head">Stage 2 — QHED: Quantum Edge Detection <span>qsobel.py</span></div>
+    <div class="cols">
+      <div class="col left">
+        <h4>Intuition</h4>
+        <p>Edges are where brightness changes sharply. QHED amplitude-encodes a row of
+        pixels and applies <b>one Hadamard gate</b> to the last qubit. By quantum
+        interference, this computes the <b>difference of every neighbouring pixel pair
+        at once</b>.</p>
+        <p>Big difference = edge; small = flat region. Do it for rows and columns, combine,
+        and you get a full <b>edge map</b> using only <b>log₂N qubits</b> per line.</p>
+      </div>
+      <div class="col right">
+        <h4>Formula</h4>
+        <div class="formula">
+          H on LSB:&nbsp; (a, b) → ( (a+b)/√2 , (a−b)/√2 )
+          <small>the (a−b) outputs are the pixel gradients</small>
+        </div>
+        <div class="formula">
+          E(y,x) = √( g<sub>h</sub>² + g<sub>v</sub>² )
+          <small>g<sub>h</sub> = row gradient, g<sub>v</sub> = column gradient</small>
+        </div>
+        <p><span class="tag">RESULT</span> ODS = 0.539 on BSDS500 — matches classical Sobel (0.54).</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- STAGE 3 -->
+  <div class="stage">
+    <div class="head">Stage 3 — QUBO: Turning Segmentation into an Energy <span>superpixel.py</span></div>
+    <div class="cols">
+      <div class="col left">
+        <h4>Intuition</h4>
+        <p>We group pixels into ~12–16 <b>superpixels</b> (small patches) so the problem
+        is small enough for a quantum computer. Each superpixel gets a binary label
+        <code>z=0</code> (bg) or <code>z=1</code> (fg).</p>
+        <ul>
+          <li><b>Unary term hᵢ</b>: from colour — does this patch look like fg or bg? (a GMM trained on user "seed" pixels decides).</li>
+          <li><b>Pairwise term Jᵢⱼ</b>: neighbours with similar colour should share a label — <b>unless QHED found an edge between them</b> (then allow a cut).</li>
+          <li><b>Seeds</b> (known fg/bg patches) are fixed and folded in, shrinking the problem.</li>
+        </ul>
+      </div>
+      <div class="col right">
+        <h4>Formula</h4>
+        <div class="formula">
+          E(z) = Σ<sub>i</sub> h<sub>i</sub> z<sub>i</sub> + Σ<sub>(i,j)</sub> J<sub>ij</sub> (z<sub>i</sub> − z<sub>j</sub>)²
+        </div>
+        <div class="formula">
+          h<sub>i</sub> = log P(c<sub>i</sub>|BG) − log P(c<sub>i</sub>|FG)
+        </div>
+        <div class="formula">
+          J<sub>ij</sub> = β · e<sup>−‖c<sub>i</sub>−c<sub>j</sub>‖²/σ²</sup> · (1 − qhed<sub>ij</sub>)
+          <small>qhed<sub>ij</sub> = quantum edge strength on the shared boundary ← Stage 2 feeds in here</small>
+        </div>
+        <div class="formula">
+          QUBO → Ising:&nbsp; h<sup>I</sup><sub>i</sub> = −h<sub>i</sub>/2 ,&nbsp; J<sup>I</sup><sub>ij</sub> = −J<sub>ij</sub>/2
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STAGE 4 -->
+  <div class="stage">
+    <div class="head">Stage 4 — QAOA: Quantum Optimization of the Labels <span>qaoa_seg.py</span></div>
+    <div class="cols">
+      <div class="col left">
+        <h4>Intuition</h4>
+        <p>Now find the labelling with the <b>lowest energy</b>. QAOA builds a quantum
+        circuit whose measurement probabilities concentrate on good (low-energy) answers.</p>
+        <ul>
+          <li>Start all qubits in superposition <code>|+⟩</code> — every labelling equally likely.</li>
+          <li>A <b>cost layer</b> tilts phases toward low-energy labellings.</li>
+          <li>A <b>mixer layer</b> shuffles probability between candidates.</li>
+          <li>Classical optimizer (<b>COBYLA</b>) tunes the angles (γ, β).</li>
+          <li>Measure → most likely bitstring → expand to a pixel mask.</li>
+        </ul>
+      </div>
+      <div class="col right">
+        <h4>Formula</h4>
+        <div class="formula">
+          H<sub>C</sub> = Σ h<sup>I</sup><sub>i</sub> Z<sub>i</sub> + Σ J<sup>I</sup><sub>ij</sub> Z<sub>i</sub>Z<sub>j</sub> &nbsp;&nbsp; H<sub>M</sub> = Σ X<sub>i</sub>
+        </div>
+        <div class="formula">
+          |ψ(γ,β)⟩ = U<sub>M</sub>(β) · U<sub>C</sub>(γ) · |+⟩<sup>⊗n</sup>
+          <small>U<sub>C</sub>=e<sup>−iγH<sub>C</sub></sup>, U<sub>M</sub>=e<sup>−iβH<sub>M</sub></sup></small>
+        </div>
+        <div class="formula">
+          (γ*,β*) = argmin ⟨ψ| H<sub>C</sub> |ψ⟩
+        </div>
+        <p><span class="tag">DECODE</span> argmax(probs) → bitstring → fg/bg superpixel labels.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ WORKED EXAMPLE ============ -->
+  <h2>5 · A Tiny Worked Example (4×4)</h2>
+  <p>A bright "house" on the right, dark background on the left. Watch it flow through the pipeline:</p>
+  <div class="grids">
+    <div class="grid">
+      <table><caption>Input (brightness)</caption>
+        <tr><td class="bg">50</td><td class="bg">55</td><td class="fg">200</td><td class="fg">205</td></tr>
+        <tr><td class="bg">55</td><td class="bg">60</td><td class="fg">210</td><td class="fg">200</td></tr>
+        <tr><td class="bg">60</td><td class="bg">55</td><td class="fg">205</td><td class="fg">210</td></tr>
+        <tr><td class="bg">55</td><td class="bg">50</td><td class="fg">200</td><td class="fg">205</td></tr>
+      </table>
+    </div>
+    <div class="gstep">→</div>
+    <div class="grid">
+      <table><caption>QHED edge map</caption>
+        <tr><td>.05</td><td><b>.97</b></td><td>.07</td><td>.03</td></tr>
+        <tr><td>.05</td><td><b>1.0</b></td><td>.07</td><td>.07</td></tr>
+        <tr><td>.05</td><td><b>1.0</b></td><td>.05</td><td>.03</td></tr>
+        <tr><td>.03</td><td><b>1.0</b></td><td>.03</td><td>0</td></tr>
+      </table>
+    </div>
+    <div class="gstep">→</div>
+    <div class="grid">
+      <table><caption>QUBO min → (0,1)</caption>
+        <tr><td colspan="2" style="border:none; font-size:12px;">SP2=0, SP3=1<br>E=−13.86</td></tr>
+      </table>
+    </div>
+    <div class="gstep">→</div>
+    <div class="grid">
+      <table><caption>Final mask</caption>
+        <tr><td class="bg">0</td><td class="bg">0</td><td class="fg">1</td><td class="fg">1</td></tr>
+        <tr><td class="bg">0</td><td class="bg">0</td><td class="fg">1</td><td class="fg">1</td></tr>
+        <tr><td class="bg">0</td><td class="bg">0</td><td class="fg">1</td><td class="fg">1</td></tr>
+        <tr><td class="bg">0</td><td class="bg">0</td><td class="fg">1</td><td class="fg">1</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="box note">The QAOA reached ⟨H<sub>C</sub>⟩ ≈ −11.06 vs the true optimum −11.52 —
+  a <b>96% approximation</b> at depth p=1. The house is correctly foreground.
+  Full arithmetic is in <code>NUMERICAL_WALKTHROUGH.md</code>.</div>
+
+  <!-- ============ USES & BENEFITS ============ -->
+  <h2>6 · Uses &amp; Benefits</h2>
+
+  <h3>Per-stage</h3>
+  <table class="data">
+    <tr><th>Stage</th><th>What it is used for</th><th>Benefit</th></tr>
+    <tr>
+      <td><b>NEQR</b><br>encoding</td>
+      <td>Loads the image into a quantum state that later stages operate on.</td>
+      <td>Provably <b>lossless</b> (PSNR=∞) — no edge or texture is blurred by the encoding; gives an honest, exact quantum substrate.</td>
+    </tr>
+    <tr>
+      <td><b>QHED</b><br>edge detection</td>
+      <td>Finds object boundaries; produces the edge feature used by the QUBO.</td>
+      <td>Needs only <b>log₂N qubits</b> per line; one Hadamard does all neighbour gradients; matches classical Sobel quality.</td>
+    </tr>
+    <tr>
+      <td><b>QUBO</b><br>formulation</td>
+      <td>Expresses "good segmentation" as a single energy to minimize.</td>
+      <td>Reduces the problem to <b>~12–16 variables</b> (superpixels) and injects <b>quantum edge info</b> into the pairwise term — a real quantum-to-quantum feature handoff.</td>
+    </tr>
+    <tr>
+      <td><b>QAOA</b><br>optimization</td>
+      <td>Solves the labelling: which superpixels are foreground vs background.</td>
+      <td>Explores the exponential label space in superposition; hardware-ready circuit (RX/RZ/CNOT only); tunable depth p for accuracy.</td>
+    </tr>
+  </table>
+
+  <h3>Overall pipeline</h3>
+  <ul>
+    <li><b>End-to-end quantum</b>: representation → features → optimization all use quantum circuits, not just one isolated step.</li>
+    <li><b>Honest &amp; benchmarked</b>: every quantum stage is compared to a classical baseline (Sobel, GrabCut) with real metrics.</li>
+    <li><b>Modular</b>: NEQR, QHED, QUBO and QAOA are independent — each can be swapped or improved on its own.</li>
+    <li><b>Hardware roadmap</b>: works today on a simulator; the same circuits scale onto real quantum devices as qubit counts grow.</li>
+    <li><b>Interpretable</b>: the QUBO energy and the QAOA bitstring are fully inspectable — you can see <i>why</i> a pixel was labelled fg/bg.</li>
+  </ul>
+
+  <h3>Where it could be applied</h3>
+  <table class="data">
+    <tr><th>Domain</th><th>Use</th><th>Why quantum could help</th></tr>
+    <tr><td>Medical imaging</td><td>Isolate tumours / organs from scans (MRI, CT).</td><td>Lossless encoding preserves fine boundaries critical for diagnosis.</td></tr>
+    <tr><td>Satellite / remote sensing</td><td>Separate land, water, crops, buildings.</td><td>Edge + region optimization handles large, texture-rich scenes.</td></tr>
+    <tr><td>Industrial inspection</td><td>Detect defects / parts on a production line.</td><td>Fast superpixel-level labelling with sharp quantum edges.</td></tr>
+    <tr><td>Document / object cut-out</td><td>Foreground extraction for editing, AR, datasets.</td><td>Seeded QUBO mirrors GrabCut but in a quantum-native form.</td></tr>
+  </table>
+
+  <!-- ============ LIMITATIONS ============ -->
+  <h2>7 · Honest Limitations</h2>
+  <div class="box limit">
+    <ul style="margin:0;">
+      <li><b>Simulation scale</b>: runs on the <code>lightning.qubit</code> simulator, tractable to ~25 qubits. Full-image, per-pixel quantum segmentation needs future hardware.</li>
+      <li><b>State-preparation bottleneck</b> (Ruan 2021): loading the image into amplitudes is O(N) classically — the quantum speedup in QHED is real only with efficient quantum loading (qRAM).</li>
+      <li><b>Proof of concept</b>: at 8–12 qubits, QAOA is coarser than full-resolution classical GrabCut. The contribution is a correct, benchmarked, end-to-end quantum pipeline — not yet state-of-the-art accuracy.</li>
+    </ul>
+  </div>
+
+  <footer>
+    <b>Companion documents:</b>
+    <a href="README.md">README.md</a> (overview &amp; run commands) ·
+    <a href="TECHNICAL_GUIDE.md">TECHNICAL_GUIDE.md</a> (full theory + code) ·
+    <a href="NUMERICAL_WALKTHROUGH.md">NUMERICAL_WALKTHROUGH.md</a> (every number by hand) ·
+    <a href="QA.md">QA.md</a> (30 viva questions) ·
+    <a href="paper/paper.tex">paper/paper.tex</a> (IEEE Access paper).
+    <br><br><i>Quantum Image Segmentation · NEQR → QHED → QUBO → QAOA · built with PennyLane.</i>
+  </footer>
+
+</div>
+</body>
+</html>
