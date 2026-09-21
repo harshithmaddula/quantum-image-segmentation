@@ -178,20 +178,6 @@ This project follows the honest-caveat convention established by Ruan (2021):
 
 ---
 
-## Citation
-
-If you use this work, please cite:
-
-```bibtex
-@article{quantum_seg_2024,
-  title   = {A Four-Stage Quantum Image Segmentation Framework},
-  author  = {[Author]},
-  journal = {IEEE Access},
-  year    = {2024}
-}
-```
-
----
 
 ## References
 
