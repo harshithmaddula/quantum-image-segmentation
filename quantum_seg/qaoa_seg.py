@@ -46,7 +46,7 @@ from .superpixel import (
     qubo_to_ising,
     slic_segments,
     sp_adjacency,
-    sp_mean_colors,
+    sp_hybrid_features,
     sp_qhed_edge_strength,
 )
 
@@ -297,30 +297,38 @@ def segment_image(
     # ---- 2. SLIC superpixels ----
     labels, n_sp = slic_segments(img_bgr, n_segments=n_segments, compactness=compactness)
 
-    # ---- 3. Per-SP Lab colors ----
+    # ---- 3. Hybrid classical + quantum features ----
     img_lab = cv2.cvtColor(img_bgr.astype(np.float32) / 255.0, cv2.COLOR_BGR2Lab)
-    sp_colors = sp_mean_colors(img_lab, labels, n_sp)
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    sobel_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    sobel_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    classical_edges = cv2.normalize(np.sqrt(sobel_x ** 2 + sobel_y ** 2), None, 0.0, 1.0, cv2.NORM_MINMAX)
+    if use_qhed:
+        hybrid_edge_map = np.clip(0.75 * edge_map + 0.25 * classical_edges, 0.0, 1.0)
+    else:
+        hybrid_edge_map = classical_edges
+    sp_features = sp_hybrid_features(img_lab, labels, n_sp, hybrid_edge_map)
 
-    # ---- 4. Adjacency + QHED edge strength ----
+    # ---- 4. Adjacency + hybrid edge strength ----
     edges    = sp_adjacency(labels, n_sp)
-    qhed_str = sp_qhed_edge_strength(labels, edge_map, edges)
+    qhed_str = sp_qhed_edge_strength(labels, hybrid_edge_map, edges)
 
     # ---- 5. Seed classification ----
     sp_type = classify_seeds(labels, trimap, n_sp)
 
     # ---- 6. GMM on seed pixels ----
-    fg_pixels = img_lab[trimap == 255].reshape(-1, 3)
-    bg_pixels = img_lab[trimap == 0  ].reshape(-1, 3)
+    fg_pixels = sp_features[[i for i in range(n_sp) if sp_type[i] == 1]]
+    bg_pixels = sp_features[[i for i in range(n_sp) if sp_type[i] == 0]]
     if len(fg_pixels) == 0:
-        fg_pixels = sp_colors[[i for i in range(n_sp) if sp_type[i] == 1]]
+        fg_pixels = sp_features[np.unique(labels[trimap == 255])] if np.any(trimap == 255) else sp_features
     if len(bg_pixels) == 0:
-        bg_pixels = sp_colors[[i for i in range(n_sp) if sp_type[i] == 0]]
+        bg_pixels = sp_features[np.unique(labels[trimap == 0])] if np.any(trimap == 0) else sp_features
     gmm_fg = fit_gmm(fg_pixels, n_components=gmm_components, random_state=random_state)
     gmm_bg = fit_gmm(bg_pixels, n_components=gmm_components, random_state=random_state)
 
     # ---- 7. QUBO terms ----
-    h = compute_unary(sp_colors, gmm_fg, gmm_bg)
-    J = compute_pairwise(sp_colors, edges, qhed_str, beta=beta, sigma=sigma)
+    h = compute_unary(sp_features, gmm_fg, gmm_bg)
+    J = compute_pairwise(sp_features, edges, qhed_str, beta=beta, sigma=sigma)
 
     # ---- 8. Reduce QUBO with seed hard constraints ----
     h_eff, J_free, free_nodes = build_reduced_qubo(h, J, sp_type, n_sp)
@@ -362,7 +370,7 @@ def segment_image(
         "J_free":      J_free,
         "best_params": best_params,
         "best_cost":   best_cost,
-        "qhed_map":    edge_map if use_qhed else None,
+        "qhed_map":    hybrid_edge_map if use_qhed else classical_edges,
         "sim_time_s":  time.time() - t0,
     }
 

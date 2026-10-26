@@ -81,6 +81,39 @@ def sp_mean_colors(
     return colors / counts[:, None]
 
 
+def sp_hybrid_features(
+    img_lab: np.ndarray,
+    labels: np.ndarray,
+    n_sp: int,
+    edge_map: np.ndarray | None = None,
+) -> np.ndarray:
+    """Hybrid superpixel features: Lab color + local contrast + edge prior.
+
+    The unary term is therefore richer than pure Lab color alone, while staying cheap
+    enough for the QAOA stage. QHED is kept as the edge prior, but classical local
+    contrast adds robustness on noisy or weak quantum maps.
+    """
+    colors = sp_mean_colors(img_lab, labels, n_sp)
+    gray = np.asarray(img_lab[:, :, 0], dtype=np.float64)
+    flat_lbl = labels.ravel()
+    counts = np.bincount(flat_lbl, minlength=n_sp).astype(np.float64)
+    counts = np.where(counts > 0, counts, 1.0)
+
+    luma = np.bincount(flat_lbl, weights=gray.ravel(), minlength=n_sp) / counts
+    local_contrast = np.zeros((n_sp,), dtype=np.float64)
+    for sp in range(n_sp):
+        idx = flat_lbl == sp
+        if np.any(idx):
+            local_contrast[sp] = float(np.std(gray.ravel()[idx]))
+
+    feats = np.column_stack([colors, luma, local_contrast])
+    if edge_map is not None:
+        em = np.asarray(edge_map, dtype=np.float64).ravel()
+        edge_mean = np.bincount(flat_lbl, weights=em, minlength=n_sp) / counts
+        feats = np.column_stack([feats, edge_mean])
+    return feats.astype(np.float64)
+
+
 # --------------------------------------------------------------------------- #
 # 3. Superpixel adjacency graph
 # --------------------------------------------------------------------------- #
@@ -146,15 +179,25 @@ def sp_qhed_edge_strength(
 # 5a. GMM fitting on seed pixels
 # --------------------------------------------------------------------------- #
 def fit_gmm(pixels: np.ndarray, n_components: int = 3, random_state: int = 42):
-    """Fit a GaussianMixture on pixel Lab colors (N, 3).
+    """Fit a GaussianMixture on pixel features (N, d).
 
-    Returns a fitted sklearn.mixture.GaussianMixture.
+    If a trimap class contains only a single superpixel sample, scikit-learn rejects
+    the fit because GaussianMixture requires at least 2 samples. Duplicate the lone
+    sample to preserve the class statistics while keeping the model numerically valid.
     """
     from sklearn.mixture import GaussianMixture
-    n_comp = max(1, min(n_components, len(pixels) // 2)) if len(pixels) >= 2 else 1
+    pixels = np.asarray(pixels, dtype=np.float64)
+    if pixels.size == 0:
+        raise ValueError("fit_gmm received an empty feature array")
+    if pixels.ndim == 1:
+        pixels = pixels.reshape(-1, 1)
+    if len(pixels) == 1:
+        pixels = np.vstack([pixels, pixels[0]])
+    n_samples = len(pixels)
+    n_comp = max(1, min(n_components, n_samples // 2))
     gmm = GaussianMixture(n_components=n_comp, covariance_type="full",
                           max_iter=100, random_state=random_state)
-    gmm.fit(pixels.reshape(-1, 3))
+    gmm.fit(pixels)
     return gmm
 
 
@@ -162,7 +205,7 @@ def fit_gmm(pixels: np.ndarray, n_components: int = 3, random_state: int = 42):
 # 5b. Unary terms
 # --------------------------------------------------------------------------- #
 def compute_unary(
-    sp_colors: np.ndarray,
+    sp_features: np.ndarray,
     gmm_fg,
     gmm_bg,
 ) -> np.ndarray:
@@ -171,8 +214,8 @@ def compute_unary(
     Positive h_i → bg-likely (z_i=0 preferred).
     Negative h_i → fg-likely (z_i=1 preferred).
     """
-    log_fg = gmm_fg.score_samples(sp_colors)   # (n_sp,)
-    log_bg = gmm_bg.score_samples(sp_colors)   # (n_sp,)
+    log_fg = gmm_fg.score_samples(sp_features)   # (n_sp,)
+    log_bg = gmm_bg.score_samples(sp_features)   # (n_sp,)
     return log_bg - log_fg
 
 
