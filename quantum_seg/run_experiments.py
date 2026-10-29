@@ -28,6 +28,7 @@ from .qsobel import qhed_edges, qhed_edges_refined
 from . import qaoa_seg as QS
 from .figures import grabcut_panel, misc_fgbg_panel
 from .superpixel import auto_trimap
+from .qubo_solvers import cut_energy, solve_exact, solve_graph_cut
 
 RESULTS = os.path.join(D.ROOT, "results")
 
@@ -145,8 +146,8 @@ With `n_segments=16` and typical GrabCut-50 trimaps having ~30-50% seed pixels,
 simulator (tractable to ~25 qubits).  Full-image QAOA (one qubit/pixel) requires
 near-future fault-tolerant quantum hardware.
 
-QAOA depth p=1 provides a constant-factor approximation guarantee; p=2 improves
-the approximation ratio at the cost of 4 variational parameters instead of 2.
+QAOA is a variational heuristic here; its decoded assignment is checked against
+the same cut energy and is not assumed to be optimal.
 
 Quantum integration: QHED edge strengths computed by the quantum Hadamard circuit
 (Stage 2) modulate J_ij pairwise terms — this is the genuine quantum feature of
@@ -161,8 +162,9 @@ def stage_grabcut(
     beta: float = 10.0,
     use_qhed: bool = True,
     maxiter: int = 200,
+    size: int = 128,
 ) -> str:
-    """Stage 4: QAOA fg/bg segmentation vs classical GrabCut on GrabCut-50."""
+    """Compare graph cut and QAOA with GrabCut using GrabCut-50 ground truth."""
     dest = D.fetch_grabcut50()
     if dest is None:
         return (
@@ -170,62 +172,70 @@ def stage_grabcut(
             "Place files in `data/grabcut50/` and re-run with `--grabcut`._"
         )
 
+    import cv2
     rows = []
+    summaries = {"Graph cut": [], "QAOA": [], "GrabCut": []}
+    latencies = {"Graph cut": [], "QAOA": [], "GrabCut": []}
+    processed = 0
     for name, img_bgr, trimap, gt_mask in D.grabcut_triplets(dest, limit=limit):
-        # QAOA segmentation
-        result = QS.segment_image(
-            img_bgr, trimap,
-            n_segments=n_segments, p=p, beta=beta,
-            maxiter=maxiter, use_qhed=use_qhed,
-        )
-        qaoa_mask = result["mask"]
+        img_bgr = cv2.resize(img_bgr, (size, size), interpolation=cv2.INTER_AREA)
+        trimap = cv2.resize(trimap, (size, size), interpolation=cv2.INTER_NEAREST)
+        gt_mask = cv2.resize(gt_mask.astype(np.uint8), (size, size),
+                             interpolation=cv2.INTER_NEAREST).astype(bool)
+        unknown = trimap == 128
+        if not np.any(unknown):
+            unknown = np.ones_like(gt_mask, dtype=bool)
 
-        # Classical GrabCut baseline
+        masks = {}
+        results = {}
+        for solver in ("graphcut", "qaoa"):
+            result = QS.segment_image(
+                img_bgr, trimap,
+                n_segments=n_segments, p=p, beta=beta,
+                maxiter=maxiter, use_qhed=use_qhed, solver=solver,
+            )
+            results[solver] = result
+            masks[solver] = result["mask"]
+            label = "Graph cut" if solver == "graphcut" else "QAOA"
+            metrics = M.segmentation_report(result["mask"][unknown], gt_mask[unknown])
+            latency = float(result["sim_time_s"])
+            summaries[label].append(metrics)
+            latencies[label].append(latency)
+            rows.append([label, name, metrics["IoU"], metrics["Dice"],
+                         metrics["PixelAcc"], f"{latency:.3f}s"])
+
+        gc_start = time.perf_counter()
         gc_mask = B.grabcut_baseline(img_bgr, trimap)
-
-        # Metrics on unknown region (standard GrabCut evaluation protocol)
-        unknown = (trimap == 128)
-        if unknown.sum() > 0:
-            m_qaoa = M.segmentation_report(qaoa_mask[unknown], gt_mask[unknown])
-            m_gc   = M.segmentation_report(gc_mask[unknown],   gt_mask[unknown])
-        else:
-            m_qaoa = M.segmentation_report(qaoa_mask, gt_mask)
-            m_gc   = M.segmentation_report(gc_mask,   gt_mask)
-
-        # Save 6-panel figure
+        gc_latency = time.perf_counter() - gc_start
+        gc_metrics = M.segmentation_report(gc_mask[unknown], gt_mask[unknown])
+        summaries["GrabCut"].append(gc_metrics)
+        latencies["GrabCut"].append(gc_latency)
+        rows.append(["GrabCut", name, gc_metrics["IoU"], gc_metrics["Dice"],
+                     gc_metrics["PixelAcc"], f"{gc_latency:.3f}s"])
         grabcut_panel(
-            name, img_bgr, trimap, qaoa_mask, gc_mask, gt_mask,
-            qhed_map=result["qhed_map"],
-            metrics_qaoa=m_qaoa, metrics_gc=m_gc,
+            name, img_bgr, trimap, masks["graphcut"], gc_mask, gt_mask,
+            qhed_map=results["graphcut"]["qhed_map"],
+            metrics_qaoa=summaries["graphcut"][-1], metrics_gc=gc_metrics,
+            solver_label="Graph cut (exact)",
         )
-
-        n_free = result["n_free"]
-        rows.append(["QAOA (quantum)",   name, m_qaoa["IoU"], m_qaoa["Dice"],
-                     m_qaoa["PixelAcc"], n_free, f"{result['sim_time_s']:.1f}s"])
-        rows.append(["GrabCut (classical)", name, m_gc["IoU"], m_gc["Dice"],
-                     m_gc["PixelAcc"], "-", "-"])
+        processed += 1
 
     if not rows:
         return "_No GrabCut-50 images found. Check data/grabcut50/ layout._"
 
-    tbl = _table(
-        ["method", "image", "IoU", "Dice", "PixelAcc", "n_qubits", "sim_time"],
-        rows,
-    )
-
-    # Summary stats
-    qaoa_rows = [r for r in rows if "QAOA" in r[0]]
-    gc_rows   = [r for r in rows if "GrabCut" in r[0]]
-    def _mean_iou(rs):
-        vals = [r[2] for r in rs if isinstance(r[2], float)]
-        return float(np.mean(vals)) if vals else 0.0
-
-    summary = (
-        f"\nMean IoU (unknown region, {len(qaoa_rows)} images): "
-        f"QAOA={_mean_iou(qaoa_rows):.4f}  GrabCut={_mean_iou(gc_rows):.4f}\n"
-    )
-
-    return f"Evaluated on {len(qaoa_rows)} GrabCut-50 images.\n\n{tbl}{summary}\n{_QAOA_CAVEAT}"
+    per_image = _table(["method", "image", "IoU", "Dice", "PixelAcc", "latency"], rows)
+    summary_rows = []
+    for method, values in summaries.items():
+        summary_rows.append([
+            method,
+            float(np.mean([v["IoU"] for v in values])),
+            float(np.mean([v["Dice"] for v in values])),
+            float(np.median(latencies[method])),
+        ])
+    summary = _table(["method", "mean_IoU", "mean_Dice", "median_latency_s"], summary_rows)
+    return (f"Evaluation set: GrabCut-50 real masks, unknown trimap region, {size}x{size}; "
+            f"{processed} images.\n\n**Aggregate comparison:**\n\n{summary}\n\n"
+            f"**Per-image results:**\n\n{per_image}\n\n{_QAOA_CAVEAT}")
 
 
 # --------------------------------------------------------------------------- #
@@ -255,8 +265,9 @@ def stage_misc_fgbg(
     p: int = 1,
     use_qhed: bool = True,
     maxiter: int = 150,
+    solver: str = "graphcut",
 ) -> str:
-    """Stage 5: QAOA fg/bg on misc images using an auto-generated center/border trimap.
+    """Stage 5: fg/bg segmentation on misc images using a center/border trimap.
 
     No ground truth is available -- metrics are computed against the auto-trimap
     fg region itself and are marked with * to indicate this caveat.
@@ -286,7 +297,8 @@ def stage_misc_fgbg(
         trimap = auto_trimap(H, W)
 
         result  = QS.segment_image(img_bgr, trimap, n_segments=n_segments,
-                                   p=p, maxiter=maxiter, use_qhed=use_qhed)
+                       p=p, maxiter=maxiter, use_qhed=use_qhed,
+                       solver=solver)
         gc_mask = B.grabcut_baseline(img_bgr, trimap)
 
         # Metrics on unknown region vs auto-trimap fg (no human GT)
@@ -310,23 +322,81 @@ def stage_misc_fgbg(
 
         misc_fgbg_panel(name, img_bgr, trimap, result["mask"], gc_mask,
                         qhed_map=result["qhed_map"],
-                        metrics_qaoa=m_qaoa, metrics_gc=m_gc)
+                        metrics_qaoa=m_qaoa, metrics_gc=m_gc,
+                        solver_label=("Graph cut (exact)" if solver == "graphcut" else "QAOA"))
 
-        rows.append(["QAOA", name, m_qaoa["IoU"], m_qaoa["Dice"],
-                     m_qaoa["PixelAcc"], result["n_free"], f"{result['sim_time_s']:.1f}s"])
+        rows.append([solver, name, m_qaoa["IoU"], m_qaoa["Dice"],
+                 m_qaoa["PixelAcc"], result["n_free"], f"{result['sim_time_s']:.1f}s"])
         rows.append(["GrabCut", name, m_gc["IoU"], m_gc["Dice"],
                      m_gc["PixelAcc"], "-", "-"])
 
     if not rows:
         return "_No misc images processed._"
 
-    tbl = _table(["method", "image", "IoU*", "Dice*", "PixelAcc*", "n_qubits", "sim_time"], rows)
+    tbl = _table(["method", "image", "IoU*", "Dice*", "PixelAcc*", "n_free", "latency"], rows)
     note = (
         "\n_\\* metrics are vs the auto-generated center-ellipse trimap, NOT human GT. "
-        "Use as a relative comparison between QAOA and GrabCut only._\n"
+        "Use as a proxy-only comparison between the selected solver and GrabCut._\n"
         f"\nFigures saved to `results/figures/misc_fgbg_*.png`\n"
     )
     return f"Evaluated on {len(rows)//2} misc images at {size}×{size}, n_segments={n_segments}.\n\n{tbl}{note}"
+
+
+def stage_solver_validation(n_cases: int = 10, maxiter: int = 50) -> str:
+    """Compare graph cut and QAOA assignments against exact enumeration."""
+    rng = np.random.default_rng(20261027)
+    methods = {"Graph cut": [], "QAOA": []}
+    qaoa_gaps = []
+    rows = []
+    for case in range(n_cases):
+        n_nodes = 3 + case % 6
+        h_eff = rng.normal(0.0, 1.0, n_nodes)
+        J_free = {
+            (i, j): float(rng.uniform(0.1, 2.0))
+            for i in range(n_nodes)
+            for j in range(i + 1, n_nodes)
+            if rng.random() < 0.45
+        }
+        _, exact_energy = solve_exact(h_eff, J_free)
+        graph_assignment, _ = solve_graph_cut(h_eff, J_free)
+        graph_energy = cut_energy(graph_assignment, h_eff, J_free)
+
+        h_ising, J_ising = QS.qubo_to_ising(h_eff, J_free)
+        wires = list(range(n_nodes))
+        cost_h = QS.build_cost_hamiltonian(h_ising, J_ising, wires)
+        mixer_h = QS.build_mixer_hamiltonian(wires)
+        cost_qnode, prob_qnode = QS.make_qaoa_circuit(cost_h, mixer_h, wires, p=1)
+        params, _ = QS.optimize_qaoa(
+            cost_qnode, p=1, maxiter=maxiter, random_state=case,
+            n_restarts=1,
+        )
+        qaoa_assignment = QS.decode_qaoa(prob_qnode, params, n_nodes)
+        qaoa_energy = cut_energy(qaoa_assignment, h_eff, J_free)
+        graph_gap = max(0.0, graph_energy - exact_energy)
+        qaoa_gap = max(0.0, qaoa_energy - exact_energy)
+        graph_matches = np.isclose(graph_energy, exact_energy, rtol=1e-10, atol=1e-8)
+        qaoa_matches = np.isclose(qaoa_energy, exact_energy, rtol=1e-10, atol=1e-8)
+        methods["Graph cut"].append(bool(graph_matches))
+        methods["QAOA"].append(bool(qaoa_matches))
+        qaoa_gaps.append(qaoa_gap)
+        rows.append([case + 1, n_nodes, exact_energy, graph_energy,
+                     qaoa_energy, qaoa_gap])
+
+    details = _table(["case", "n_free", "exact_E", "graphcut_E", "qaoa_E", "qaoa_gap"], rows)
+    summary = _table(
+        ["solver", "exact_matches", "match_rate", "mean_QAOA_gap_if_miss"],
+        [
+            ["Graph cut", f"{sum(methods['Graph cut'])}/{n_cases}",
+             float(np.mean(methods["Graph cut"])), "-"],
+            ["QAOA", f"{sum(methods['QAOA'])}/{n_cases}",
+             float(np.mean(methods["QAOA"])),
+             float(np.mean([gap for gap, matched in zip(qaoa_gaps, methods["QAOA"])
+                            if not matched]))
+             if any(not matched for matched in methods["QAOA"]) else 0.0],
+        ],
+    )
+    return ("Deterministic synthetic submodular QUBOs; exact optimum from enumerating "
+            f"all assignments (n_free <= 8).\n\n{summary}\n\n{details}")
 
 
 # --------------------------------------------------------------------------- #
@@ -337,9 +407,11 @@ def main():
     ap.add_argument("--bsds-size", type=int, default=256)
     ap.add_argument("--misc-size", type=int, default=128)
     ap.add_argument("--grabcut", action="store_true",
-                    help="download GrabCut-50 and run QAOA fg/bg segmentation (Stage 4)")
+                    help="download GrabCut-50 and compare graph cut, QAOA and GrabCut (Stage 4)")
     ap.add_argument("--grabcut-limit", type=int, default=10,
                     help="number of GrabCut-50 images to process")
+    ap.add_argument("--grabcut-size", type=int, default=128,
+                    help="square evaluation size for image, trimap and ground truth")
     ap.add_argument("--grabcut-segments", type=int, default=16,
                     help="SLIC superpixel count (≈ QAOA qubit count)")
     ap.add_argument("--grabcut-depth", type=int, default=1,
@@ -347,16 +419,26 @@ def main():
     ap.add_argument("--grabcut-no-qhed", action="store_true",
                     help="disable QHED edge integration (ablation)")
     ap.add_argument("--misc-fgbg", action="store_true",
-                    help="run QAOA fg/bg on misc images with auto-trimap (Stage 5)")
+                    help="run fg/bg segmentation on misc images with auto-trimap (Stage 5)")
     ap.add_argument("--misc-fgbg-size", type=int, default=128,
                     help="resize misc images to this square size before processing")
     ap.add_argument("--misc-fgbg-segments", type=int, default=12,
                     help="SLIC superpixel count for misc fg/bg stage")
+    ap.add_argument("--misc-fgbg-solver", choices=("graphcut", "qaoa"), default="graphcut",
+                    help="reduced-QUBO solver for misc images (default: exact graphcut)")
     ap.add_argument("--misc-fgbg-names", nargs="*", default=None,
                     help="specific misc filenames to process (default: all TIFFs)")
-    ap.add_argument("--out", default=os.path.join(RESULTS, "metrics_report.md"))
+    ap.add_argument("--validate-solvers", action="store_true",
+                    help="compare graph cut and QAOA with exact enumeration on small QUBOs")
+    ap.add_argument("--out", default=None,
+                    help="output report path (default is solver-specific for misc fg/bg runs)")
     args = ap.parse_args()
     os.makedirs(RESULTS, exist_ok=True)
+
+    if args.validate_solvers:
+        report = stage_solver_validation()
+        print(report)
+        return
 
     fid_imgs = ["5.1.12.tiff", "4.2.03.tiff", "boat.512.tiff"]   # incl. texture (mandrill)
     edge_imgs = ["5.1.12.tiff", "boat.512.tiff", "4.2.03.tiff", "house.tiff"]
@@ -382,38 +464,46 @@ def main():
     else:
         parts.append("_Run with `--bsds` to download BSDS500 and compute supervised SOTA metrics._")
 
-    parts += ["\n## 4. QAOA Fg/Bg Segmentation on GrabCut-50\n"]
+    parts += ["\n## 4. Graph Cut vs QAOA vs GrabCut on Real Ground Truth\n"]
     if args.grabcut:
         parts.append(stage_grabcut(
             limit=args.grabcut_limit,
             n_segments=args.grabcut_segments,
             p=args.grabcut_depth,
             use_qhed=not args.grabcut_no_qhed,
+            size=args.grabcut_size,
         ))
         print("[stage 4] grabcut done")
     else:
         parts.append(
-            "_Run with `--grabcut` to download GrabCut-50 and evaluate QAOA fg/bg segmentation._"
+            "_Run with `--grabcut` to evaluate graph cut, QAOA and GrabCut on GrabCut-50 masks._"
         )
 
-    parts += ["\n## 5. QAOA Fg/Bg on Misc Images (auto-trimap, no human GT)\n"]
+    parts += ["\n## 5. Selected Solver on Misc Images (proxy trimap, no human GT)\n"]
     if args.misc_fgbg:
         parts.append(stage_misc_fgbg(
             images=args.misc_fgbg_names,
             size=args.misc_fgbg_size,
             n_segments=args.misc_fgbg_segments,
             use_qhed=not args.grabcut_no_qhed,
+            solver=args.misc_fgbg_solver,
         ))
         print("[stage 5] misc fgbg done")
     else:
         parts.append(
-            "_Run with `--misc-fgbg` to test QAOA fg/bg segmentation on misc images._"
+            "_Run with `--misc-fgbg` to test graph-cut segmentation; select `--misc-fgbg-solver qaoa` for QAOA._"
         )
 
     report = "\n".join(parts) + "\n"
-    with open(args.out, "w", encoding="utf-8") as f:
+    if args.out:
+        output_path = args.out
+    elif args.misc_fgbg:
+        output_path = os.path.join(RESULTS, f"metrics_report_{args.misc_fgbg_solver}.md")
+    else:
+        output_path = os.path.join(RESULTS, "metrics_report.md")
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(report)
-    print(f"\nwrote {args.out}\n")
+    print(f"\nwrote {output_path}\n")
     print(report)
 
 
