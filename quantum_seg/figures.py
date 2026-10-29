@@ -92,8 +92,9 @@ def grabcut_panel(
     qhed_map: np.ndarray | None = None,
     metrics_qaoa: dict | None = None,
     metrics_gc: dict | None = None,
+    solver_label: str = "QAOA (quantum)",
 ) -> str:
-    """Six-panel comparison: Original | Trimap | QHED edges | QAOA mask | GrabCut | GT.
+    """Six-panel comparison: Original | Trimap | QHED edges | solver | GrabCut | GT.
 
     Saves to results/figures/grabcut_<name>.png and returns the path.
     """
@@ -110,7 +111,7 @@ def grabcut_panel(
     ax[0].imshow(img_rgb);                  ax[0].set_title(name)
     ax[1].imshow(_trimap_rgb(trimap));      ax[1].set_title("Trimap (G=fg, R=bg)")
     ax[2].imshow(qhed_show, cmap="hot");    ax[2].set_title("QHED edges (quantum)")
-    ax[3].imshow(qaoa_mask, cmap="RdYlGn"); ax[3].set_title(_mask_title("QAOA (quantum)", metrics_qaoa))
+    ax[3].imshow(qaoa_mask, cmap="RdYlGn"); ax[3].set_title(_mask_title(solver_label, metrics_qaoa))
     ax[4].imshow(gc_mask, cmap="RdYlGn");   ax[4].set_title(_mask_title("GrabCut (classical)", metrics_gc))
     ax[5].imshow(np.asarray(gt_mask, np.uint8), cmap="RdYlGn"); ax[5].set_title("Ground truth")
     for a in ax:
@@ -131,8 +132,9 @@ def misc_fgbg_panel(
     qhed_map: np.ndarray | None = None,
     metrics_qaoa: dict | None = None,
     metrics_gc: dict | None = None,
+    solver_label: str = "QAOA (quantum)",
 ) -> str:
-    """Five-panel figure for misc (no ground truth): Original | Trimap | QHED | QAOA | GrabCut.
+    """Five-panel figure for misc (no ground truth): Original | Trimap | QHED | solver | GrabCut.
 
     Saves to results/figures/misc_fgbg_<name>.png and returns the path.
     """
@@ -152,7 +154,7 @@ def misc_fgbg_panel(
     ax[0].imshow(img_rgb);                         ax[0].set_title(name)
     ax[1].imshow(_trimap_rgb(trimap));             ax[1].set_title("Auto-trimap\n(G=fg seed, R=bg seed)")
     ax[2].imshow(qhed_show, cmap="hot");           ax[2].set_title("QHED edges\n(quantum)")
-    ax[3].imshow(qaoa_mask, cmap="RdYlGn");        ax[3].set_title(_title("QAOA (quantum)", metrics_qaoa))
+    ax[3].imshow(qaoa_mask, cmap="RdYlGn");        ax[3].set_title(_title(solver_label, metrics_qaoa))
     ax[4].imshow(gc_mask,   cmap="RdYlGn");        ax[4].set_title(_title("GrabCut (classical)", metrics_gc))
     for a in ax:
         a.axis("off")

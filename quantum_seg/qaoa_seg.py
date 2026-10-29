@@ -1,11 +1,11 @@
-"""QAOA-based foreground/background segmentation.
+"""QHED-informed QUBO foreground/background segmentation.
 
 Stage 4 of the quantum image segmentation pipeline:
 
   Image + trimap seeds
     → QHED edge map (Stage-2 quantum feature)
     → SLIC superpixels + QUBO construction  (superpixel.py)
-    → QAOA optimisation (this file)
+    → exact graph cut by default, or optional QAOA optimisation
     → binary fg/bg pixel mask
 
 Quantum circuit
@@ -20,7 +20,7 @@ QAOA circuit of depth p:
     |ψ(γ,β)⟩ = [Π_k U_M(β_k)·U_C(γ_k)] |+⟩^n
              where U_C(γ) = exp(−iγH_C), U_M(β) = exp(−iβH_M)
 
-Optimised with scipy COBYLA (gradient-free), 5 random restarts.
+The optional QAOA path is optimized with scipy COBYLA (gradient-free), 5 random restarts.
 
 Honest limitation: classical simulation via lightning.qubit is tractable to
 ~25 qubits; full-image QAOA at pixel granularity requires quantum hardware.
@@ -49,6 +49,7 @@ from .superpixel import (
     sp_hybrid_features,
     sp_qhed_edge_strength,
 )
+from .qubo_solvers import cut_energy, solve_graph_cut
 
 
 # --------------------------------------------------------------------------- #
@@ -135,6 +136,7 @@ def optimize_qaoa(
     init_params: np.ndarray | None = None,
     random_state: int = 0,
     n_restarts: int = 5,
+    timings: dict | None = None,
 ) -> tuple[np.ndarray, float]:
     """COBYLA optimisation of QAOA parameters with random restarts.
 
@@ -151,14 +153,19 @@ def optimize_qaoa(
     best_cost   = float("inf")
 
     actual_restarts = 1 if init_params is not None else n_restarts
+    restart_times = []
     for restart in range(actual_restarts):
         x0 = init_params if init_params is not None else rng.uniform(0, np.pi, 2 * p)
+        restart_start = time.perf_counter()
         res = minimize(cost_fn, x0, method="COBYLA",
                        options={"maxiter": maxiter, "rhobeg": 0.5})
+        restart_times.append(time.perf_counter() - restart_start)
         if res.fun < best_cost:
             best_cost   = float(res.fun)
             best_params = np.asarray(res.x, dtype=float)
 
+    if timings is not None:
+        timings["cobyla_restarts_s"] = restart_times
     return best_params, best_cost
 
 
@@ -256,6 +263,7 @@ def segment_image(
     maxiter: int = 200,
     random_state: int = 0,
     use_qhed: bool = True,
+    solver: str = "graphcut",
 ) -> dict:
     """End-to-end QAOA foreground/background segmentation.
 
@@ -272,6 +280,7 @@ def segment_image(
     maxiter     : COBYLA iterations per restart
     random_state: RNG seed
     use_qhed    : integrate QHED quantum edge map into pairwise term
+    solver      : "graphcut" (exact default) or "qaoa" (variational comparison)
 
     Returns
     -------
@@ -280,9 +289,11 @@ def segment_image(
     """
     import cv2
     t0 = time.time()
+    stage_times = {}
     H_img, W_img = img_bgr.shape[:2]
 
     # ---- 1. QHED edge map (quantum feature; resized to original dims) ----
+    stage_start = time.perf_counter()
     if use_qhed:
         from .qsobel import qhed_edges_refined
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY).astype(float)
@@ -293,11 +304,15 @@ def segment_image(
         edge_map = cv2.resize(em_p2.astype(np.float32), (W_img, H_img)).astype(float)
     else:
         edge_map = np.zeros((H_img, W_img), float)
+    stage_times["edge_map_s"] = time.perf_counter() - stage_start
 
     # ---- 2. SLIC superpixels ----
+    stage_start = time.perf_counter()
     labels, n_sp = slic_segments(img_bgr, n_segments=n_segments, compactness=compactness)
+    stage_times["slic_s"] = time.perf_counter() - stage_start
 
     # ---- 3. Hybrid classical + quantum features ----
+    stage_start = time.perf_counter()
     img_lab = cv2.cvtColor(img_bgr.astype(np.float32) / 255.0, cv2.COLOR_BGR2Lab)
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     sobel_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
@@ -308,15 +323,19 @@ def segment_image(
     else:
         hybrid_edge_map = classical_edges
     sp_features = sp_hybrid_features(img_lab, labels, n_sp, hybrid_edge_map)
+    stage_times["hybrid_features_s"] = time.perf_counter() - stage_start
 
     # ---- 4. Adjacency + hybrid edge strength ----
+    stage_start = time.perf_counter()
     edges    = sp_adjacency(labels, n_sp)
     qhed_str = sp_qhed_edge_strength(labels, hybrid_edge_map, edges)
 
     # ---- 5. Seed classification ----
     sp_type = classify_seeds(labels, trimap, n_sp)
+    stage_times["qubo_build_s"] = time.perf_counter() - stage_start
 
     # ---- 6. GMM on seed pixels ----
+    stage_start = time.perf_counter()
     fg_pixels = sp_features[[i for i in range(n_sp) if sp_type[i] == 1]]
     bg_pixels = sp_features[[i for i in range(n_sp) if sp_type[i] == 0]]
     if len(fg_pixels) == 0:
@@ -325,22 +344,32 @@ def segment_image(
         bg_pixels = sp_features[np.unique(labels[trimap == 0])] if np.any(trimap == 0) else sp_features
     gmm_fg = fit_gmm(fg_pixels, n_components=gmm_components, random_state=random_state)
     gmm_bg = fit_gmm(bg_pixels, n_components=gmm_components, random_state=random_state)
+    stage_times["gmm_s"] = time.perf_counter() - stage_start
 
     # ---- 7. QUBO terms ----
+    stage_start = time.perf_counter()
     h = compute_unary(sp_features, gmm_fg, gmm_bg)
     J = compute_pairwise(sp_features, edges, qhed_str, beta=beta, sigma=sigma)
 
     # ---- 8. Reduce QUBO with seed hard constraints ----
     h_eff, J_free, free_nodes = build_reduced_qubo(h, J, sp_type, n_sp)
+    stage_times["qubo_build_s"] += time.perf_counter() - stage_start
     n_free = len(free_nodes)
     n_fg_seeds = int(np.sum(sp_type == 1))
     n_bg_seeds = int(np.sum(sp_type == 0))
 
-    # ---- 9. QAOA ----
+    # ---- 9. Solve reduced binary energy ----
+    stage_start = time.perf_counter()
+    if solver not in {"graphcut", "qaoa"}:
+        raise ValueError("solver must be 'graphcut' or 'qaoa'")
+    solver_timings = {}
     if n_free == 0:
         z_free      = np.array([], dtype=np.int32)
         best_params = np.array([], dtype=float)
         best_cost   = 0.0
+    elif solver == "graphcut":
+        z_free, best_cost = solve_graph_cut(h_eff, J_free)
+        best_params = np.array([], dtype=float)
     else:
         h_ising, J_ising = qubo_to_ising(h_eff, J_free)
         wires = list(range(n_free))
@@ -348,9 +377,13 @@ def segment_image(
         H_M = build_mixer_hamiltonian(wires)
         cost_qnode, prob_qnode = make_qaoa_circuit(H_C, H_M, wires, p=p)
         best_params, best_cost = optimize_qaoa(
-            cost_qnode, p=p, maxiter=maxiter, random_state=random_state
+            cost_qnode, p=p, maxiter=maxiter, random_state=random_state,
+            timings=solver_timings,
         )
         z_free = decode_qaoa(prob_qnode, best_params, n_free)
+    stage_times["solver_s"] = time.perf_counter() - stage_start
+    if solver_timings:
+        stage_times.update(solver_timings)
 
     # ---- 10. Pixel mask ----
     mask = reconstruct_pixel_mask(z_free, free_nodes, sp_type, labels, n_sp)
@@ -368,9 +401,13 @@ def segment_image(
         "n_bg_seeds":  n_bg_seeds,
         "h_eff":       h_eff,
         "J_free":      J_free,
+        "free_assignment": z_free,
+        "cut_energy":  cut_energy(z_free, h_eff, J_free),
         "best_params": best_params,
         "best_cost":   best_cost,
         "qhed_map":    hybrid_edge_map if use_qhed else classical_edges,
+        "solver":      solver,
+        "stage_times_s": stage_times,
         "sim_time_s":  time.time() - t0,
     }
 
