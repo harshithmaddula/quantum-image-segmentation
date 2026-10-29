@@ -177,7 +177,7 @@ Images: 4.1.01.tiff, 5.1.12.tiff, boat.512.tiff, house.tiff, ruler.512.tiff. Qua
 | 10 synthetic QUBOs (3-8 free nodes) | Graph cut vs brute force | 10/10 | Exact |
 | 10 synthetic QUBOs (3-8 free nodes) | QAOA vs brute force | 5/10 | Mean energy gap on misses: 4.1088 |
 
-*Proxy IoU/Dice values above are NOT human-ground-truth measurements; the target is the generated center-ellipse proxy, consistent with the caveat in Section 5.*
+*Proxy IoU/Dice caveat: see Section 5; these are not human ground truth.*
 
 Real ground-truth comparison on GrabCut-50 is pending because the dataset is not currently available locally and the configured download source is unavailable.
 
