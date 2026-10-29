@@ -2,7 +2,7 @@
 
 Run:     python segment_misc.py
 Outputs: results/figures/misc_fgbg_<name>.png  for every TIFF in misc/
-         5-panel figure per image: Original | Trimap | QHED edges | QAOA mask | GrabCut mask
+         5-panel figure per image: Original | Trimap | QHED edges | solver mask | GrabCut mask
 """
 
 import sys
@@ -15,11 +15,12 @@ import gc  # garbage collection for memory management
 # User-configurable settings  (edit these lines to change behaviour)
 # --------------------------------------------------------------------------- #
 SIZE       = 128   # resize each image to SIZE×SIZE before processing
-               # 128 = fast (~8s/image),  256 = higher quality (~30s/image)
-N_SEGMENTS = 12    # SLIC superpixel count ≈ QAOA qubit count  (keep ≤ 20)
+               # 128 = fast, 256 = higher resolution
+N_SEGMENTS = 12    # SLIC superpixel count; free nodes become QAOA qubits if selected
 USE_QHED   = True  # True: quantum QHED edges feed into pairwise term
                # False: skip QHED for faster classical-only comparison
-QAOA_DEPTH = 1     # QAOA circuit depth p  (1 = fast, 2 = better approx ratio)
+QAOA_DEPTH = 1     # QAOA circuit depth p when SOLVER="qaoa"
+SOLVER     = "graphcut"  # "graphcut" (exact default) or "qaoa" (variational comparison)
 
 # --------------------------------------------------------------------------- #
 # Dependency check — must run before importing quantum_seg (which also needs cv2)
@@ -114,13 +115,14 @@ def main():
         H, W   = img_bgr.shape[:2]
         trimap = auto_trimap(H, W)
 
-        # QAOA quantum segmentation
+        # QHED-informed QUBO segmentation
         result = segment_image(
             img_bgr, trimap,
             n_segments=N_SEGMENTS,
             p=QAOA_DEPTH,
             use_qhed=USE_QHED,
             maxiter=150,
+            solver=SOLVER,
         )
 
         # Classical GrabCut baseline
@@ -139,10 +141,11 @@ def main():
             qhed_map=result["qhed_map"],
             metrics_qaoa=m_q,
             metrics_gc=m_gc,
+            solver_label=("Graph cut (exact)" if SOLVER == "graphcut" else "QAOA"),
         )
 
         t = result["sim_time_s"]
-        print(f"QAOA IoU*={m_q['IoU']:.3f}  GC IoU*={m_gc['IoU']:.3f}  "
+        print(f"{SOLVER} IoU*={m_q['IoU']:.3f}  GC IoU*={m_gc['IoU']:.3f}  "
               f"qubits={result['n_free']}  {t:.1f}s")
         rows.append((name, m_q["IoU"], m_gc["IoU"], result["n_free"], t))
         gc.collect()  # Free quantum simulator and matplotlib memory
@@ -154,7 +157,7 @@ def main():
     # Summary table
     w = 26
     print(f"\n{'─' * 72}")
-    print(f"  {'image':<{w}}  {'QAOA IoU*':>9}  {'GC IoU*':>7}  {'n_qubits':>8}  {'time':>6}")
+    print(f"  {'image':<{w}}  {SOLVER + ' IoU*':>9}  {'GC IoU*':>7}  {'n_free':>8}  {'time':>6}")
     print(f"{'─' * 72}")
     for name, iq, igc, nq, t in rows:
         print(f"  {name:<{w}}  {iq:>9.3f}  {igc:>7.3f}  {nq:>8}  {t:>5.1f}s")
@@ -164,9 +167,9 @@ def main():
     mean_gc = float(np.mean([r[2] for r in rows]))
     print(f"  {'MEAN':<{w}}  {mean_q:>9.3f}  {mean_gc:>7.3f}")
     print(f"\n* metrics vs auto-generated center-ellipse proxy — not human GT.")
-    print(f"  Use as QAOA-vs-GrabCut relative comparison only.\n")
+    print(f"  Use as {SOLVER}-vs-GrabCut proxy comparison only.\n")
     print(f"Figures saved → {FIGDIR}")
-    print(f"Open any PNG to inspect: Original | Trimap | QHED | QAOA | GrabCut\n")
+    print(f"Open any PNG to inspect: Original | Trimap | QHED | {SOLVER} | GrabCut\n")
 
 
 if __name__ == "__main__":

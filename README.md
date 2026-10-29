@@ -6,12 +6,12 @@ A four-stage quantum image processing pipeline built with [PennyLane](https://pe
 
 ## Overview
 
-Classical image segmentation methods such as GrabCut and deep-learning approaches (U-Net, SAM) operate entirely in the classical domain. This project demonstrates an end-to-end **quantum-enhanced pipeline** where each stage leverages quantum circuits — from the representation layer through to the combinatorial optimization of region labeling — while maintaining honest benchmarks against classical baselines.
+Classical image segmentation methods such as GrabCut and deep-learning approaches (U-Net, SAM) operate entirely in the classical domain. This project demonstrates a **hybrid quantum-classical pipeline**: NEQR and QHED provide quantum image-processing stages, while QHED-informed superpixel segmentation is solved exactly by graph cut by default or optionally with QAOA, alongside classical baselines.
 
 **Key contributions:**
 - **NEQR lossless encoding** — basis-encoded quantum image representation with provably perfect reconstruction (PSNR = ∞, SSIM = 1.0)
 - **QHED scalable edge detection** — quantum Hadamard circuit computing adjacent-pixel gradients in O(log N) qubits; benchmarked on BSDS500
-- **QAOA foreground/background segmentation** — superpixel-level binary labeling via QUBO/Ising optimization with QHED-modulated pairwise terms
+- **Hybrid foreground/background segmentation** — QHED-informed superpixel QUBO solved exactly by graph cut by default, with QAOA retained as an explicit comparison solver
 - **Honest resource accounting** — every quantum claim is accompanied by gate counts, qubit counts, and the Ruan (2021) state-preparation caveat
 
 ---
@@ -39,17 +39,17 @@ Classical image segmentation methods such as GrabCut and deep-learning approache
                │ (edge map used as feature in Stage 4)
                ▼
 ┌─────────────────────────────────────────┐
-│  STAGE 4 · QUBO + QAOA Fg/Bg           │
+│  STAGE 4 · QUBO + GRAPH CUT (default)  │
 │                                         │
 │  Image + trimap seeds                   │
 │    → SLIC superpixels (n ≈ 12–16)       │
 │    → Unary h_i   = log P(BG) - log P(FG)│  (GMM on seed pixels)
 │    → Pairwise J_ij = β·exp(...)·(1-qhed)│  (QHED-modulated)
 │    → Seed hard constraints              │
-│    → QUBO → Ising → QAOA circuit        │
-│    → COBYLA optimize ⟨H_C⟩              │
-│    → Decode bitstring → pixel mask      │
-│  Qubits: n_free ≤ ~12 (simulation)     │
+│    → Exact min-cut / max-flow           │
+│    → Optional QAOA + COBYLA comparison  │
+│    → Decode superpixel labels → mask    │
+│  QAOA qubits: n_free ≤ ~12 (simulation)│
 └──────────────┬──────────────────────────┘
                │
                ▼
@@ -99,6 +99,15 @@ python -m quantum_seg.run_experiments --bsds --bsds-limit 30
 
 # + Stage 5: QAOA fg/bg on misc with auto-trimap
 python -m quantum_seg.run_experiments --misc-fgbg
+
+# Select QAOA explicitly for comparison (graph cut is the default)
+python -m quantum_seg.run_experiments --misc-fgbg --misc-fgbg-solver qaoa
+
+# Validate graph cut and QAOA against exact enumeration on small QUBOs
+python -m quantum_seg.run_experiments --validate-solvers
+
+# Compare graph cut, QAOA and GrabCut on labeled GrabCut-50 masks
+python -m quantum_seg.run_experiments --grabcut --grabcut-limit 10
 ```
 
 Results written to `results/metrics_report.md`.
@@ -120,7 +129,8 @@ Quantum_Image_Segmentation/
 │   ├── neqr.py                Stage 1 — NEQR lossless quantum encoding
 │   ├── qsobel.py              Stage 2 — QHED edge detection + QSobel ref
 │   ├── superpixel.py          Stage 4 — SLIC superpixels + QUBO construction
-│   ├── qaoa_seg.py            Stage 4 — QAOA circuit, optimizer, full pipeline
+│   ├── qaoa_seg.py            Stage 4 — QUBO pipeline with graph-cut default and optional QAOA
+│   ├── qubo_solvers.py        Exact Dinic min-cut and brute-force validation solver
 │   ├── baselines.py           Classical: Sobel, Scharr, Laplacian, Canny, GrabCut
 │   ├── metrics.py             ODS/OIS, Pratt FOM, Hausdorff, IoU, Dice, PSNR, SSIM
 │   ├── data.py                Loaders: misc (USC-SIPI), BSDS500, GrabCut-50
@@ -146,8 +156,8 @@ Quantum_Image_Segmentation/
 | 1 — NEQR Encoding | Basis-encoded quantum state | USC-SIPI misc (8–32 px crops) | PSNR = ∞, SSIM = 1.0, MSE = 0 |
 | 2 — QHED Edge Detection | Quantum Hadamard + bilateral denoise | USC-SIPI misc (128×128) | 86–96% tol-1px agreement with Sobel |
 | 3 — BSDS500 Boundary | QHED-raw vs classical | BSDS500 val (256×256) | ODS 0.539 (lit. Sobel: 0.54) |
-| 4 — QAOA Fg/Bg | QAOA + QUBO graph cut | Misc images (128×128) | n_free ≈ 11 qubits; ~8–22 s/image |
-| 5 — Classical baseline | OpenCV GrabCut | Same as Stage 4 | Side-by-side comparison in figures |
+| 4 — Hybrid Fg/Bg | QHED-informed QUBO + exact graph cut (default); QAOA optional | GrabCut-50 labeled masks | IoU/Dice and median latency |
+| 5 — Proxy Fg/Bg | Selected QUBO solver + OpenCV GrabCut | USC-SIPI misc (auto-trimap proxy only) | Proxy IoU/Dice; not human-GT accuracy |
 
 ---
 
@@ -157,9 +167,9 @@ Each run of `segment_misc.py` or `--misc-fgbg` produces a **5-panel PNG** per im
 
 ```
 ┌──────────┬──────────┬──────────┬──────────┬──────────┐
-│ Original │ Trimap   │ QHED     │  QAOA    │ GrabCut  │
+│ Original │ Trimap   │ QHED     │ Graph cut│ GrabCut  │
 │ image    │ G=fg     │ edges    │  mask    │ mask     │
-│          │ R=bg     │ (quantum)│ (quantum)│(classical│
+│          │ R=bg     │ (quantum)│ (exact)  │(classical│
 └──────────┴──────────┴──────────┴──────────┴──────────┘
 ```
 
