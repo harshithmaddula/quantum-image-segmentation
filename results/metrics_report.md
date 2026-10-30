@@ -138,16 +138,20 @@ Figures saved to `results/figures/misc_fgbg_*.png`
 ## 6. Solver comparison: Graph cut vs QAOA (latency and exactness)
 
 ### Five-image profiling (QAOA, 128x128, n_segments=12)
-Mean per-image runtime share; ranges show the minimum-to-maximum across the five images.
+Five USC-SIPI misc images: 4.1.01, 5.1.12, boat.512, house, ruler.512; 128x128, n_segments=12. Each image was run once after one warm-up call. Shares are averaged across the 5 images; ranges show the minimum-to-maximum per-image share.
 
 | Stage | Mean runtime | Per-image range |
 |---|---:|---:|
-| QAOA solve loop | 58.8% | 28.4-73.7% |
-| QHED edge-map generation | 23.5% | 10.4-34.9% |
-| GMM fitting | 12.0% | 0.4-57.0% |
-| SLIC | 0.9% | 0.3-2.6% |
-| QUBO construction | 0.5% | 0.3-1.1% |
-| Hybrid feature aggregation | 0.1% | 0.0-0.2% |
+| QAOA solve loop | 66.3% | 58.4-73.4% |
+| QHED edge-map generation | 27.0% | 21.0-33.8% |
+| GMM fitting | 0.9% | 0.5-1.5% |
+| SLIC | 0.3% | 0.2-0.4% |
+| QUBO construction | 0.6% | 0.3-0.9% |
+| Hybrid feature aggregation | 0.1% | - |
+
+The listed stages account for about 95% of total runtime; the remainder is overhead not covered by the stage timers.
+
+The earlier profile included a one-time first-call GMM startup cost (about 9.7s, under 0.02s on repeat) and is superseded by these warm-run figures.
 
 ### 39-image quality comparison (USC-SIPI misc; proxy target, not human GT)
 Current graph-cut values and historical QAOA values from commit ce70682; GrabCut values are from the current report. All rows summarize 39 images at 128x128 with n_segments=12.
@@ -161,13 +165,15 @@ The 39-image QAOA-versus-graph-cut comparison is not solver-only: ce70682 used L
 | GrabCut (current report) | 39 | 0.175885 | 0.291813 |
 
 ### Five-image latency comparison (USC-SIPI misc; 128x128, n_segments=12)
-Images: 4.1.01.tiff, 5.1.12.tiff, boat.512.tiff, house.tiff, ruler.512.tiff. Quality values use the same auto-ellipse proxy target; latency is median full-pipeline time.
+Images in listed order: 4.1.01, 5.1.12, boat.512, house, ruler.512; 128x128, n_segments=12. After one warm-up call, values are the median of 3 runs per image. Per-image values are listed in that order.
 
-| Method | Mean IoU* | Mean Dice* | Median latency |
-|---|---:|---:|---:|
-| Graph cut | 0.0541 | 0.1024 | 2.4602 s |
-| QAOA | 0.0499 | 0.0950 | 6.9990 s |
-| GrabCut | 0.1048 | 0.1876 | 0.3681 s |
+| Method | Per-image latency (s) | Median latency |
+|---|---|---:|
+| Graph cut | 0.86, 0.80, 0.84, 0.84, 0.77 | 0.84 s |
+| QAOA | 2.85, 2.68, 3.31, 2.02, 1.88 | 2.68 s |
+| GrabCut | 0.19, 0.20, 0.18, 0.16, 0.26 | 0.19 s |
+
+Graph cut is about 3.2x faster than QAOA.
 
 ### Exact-match validation
 
