@@ -1,0 +1,27 @@
+{
+  "status": "ok",
+  "image": "101085.jpg",
+  "original_shape": [
+    481,
+    321
+  ],
+  "crop_shape": [
+    256,
+    256
+  ],
+  "position_qubits": 16,
+  "total_qubits": 17,
+  "elapsed_seconds": 81.91329389996827,
+  "edge_shape": [
+    256,
+    256
+  ],
+  "edge_min": 0.0,
+  "edge_max": 1.0,
+  "edge_range": 1.0,
+  "thread_cap": 6,
+  "time_cap_seconds": 1800,
+  "memory_cap_gib": 10.0,
+  "parent_elapsed_seconds": 85.03100000007544,
+  "peak_memory_gib": 0.5658912658691406
+}

@@ -1,0 +1,36 @@
+{
+  "task": "T2 QHED 256x256 pilot",
+  "git_commit": "b9cc3a86ffb8b23addd19084c0206e4403cead6f",
+  "python": "3.11.15",
+  "cpu": "Intel64 Family 6 Model 154 Stepping 3, GenuineIntel",
+  "logical_processors": 12,
+  "seed": 20261115,
+  "packages": {
+    "qiskit": "2.6.2",
+    "qiskit-aer": "0.18.2",
+    "numpy": "2.4.6",
+    "scipy": "1.17.1",
+    "opencv-contrib-python": "5.0.0.93",
+    "pandas": "3.1.1",
+    "matplotlib": "3.11.2",
+    "psutil": "7.2.2"
+  },
+  "settings": {
+    "pilot_image": "101085.jpg",
+    "split": "BSDS500 validation",
+    "crop": "center 256x256, no interpolation",
+    "threads": 6,
+    "time_cap_seconds": 1800,
+    "memory_cap_bytes": 10737418240
+  },
+  "t2_step_a": {
+    "split": "BSDS500 validation",
+    "selection": "first 30 sorted .jpg filenames",
+    "image_size": "center-crop 256x256, no interpolation",
+    "position_qubits": 16,
+    "auxiliary_qubits": 1,
+    "thread_cap": 6,
+    "outputs": "edge maps .npy, gradients .npz, resumable per_image_qhed.csv",
+    "warmup": "one unreported QHED call on the first pending image before timing"
+  }
+}

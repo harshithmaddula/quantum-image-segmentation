@@ -1,0 +1,34 @@
+{
+  "tuning_split": "BSDS500 train only",
+  "training_images_used": 200,
+  "tolerance_pixels": 2.7152900397563426,
+  "n_thresholds_for_sobel": 99,
+  "sobel_grid_kernel_size": [
+    3,
+    5,
+    7
+  ],
+  "canny_grid_low": [
+    25,
+    50,
+    75
+  ],
+  "canny_grid_high": [
+    100,
+    150,
+    200,
+    225
+  ],
+  "sobel": {
+    "kernel_size": 7,
+    "threshold": 0.23224489795918368,
+    "train_ods": 0.5419170516806741,
+    "train_ois": 0.598531480571498
+  },
+  "canny": {
+    "low": 75,
+    "high": 225,
+    "train_f": 0.49446307407455586,
+    "train_ois": 0.519864750262295
+  }
+}

@@ -32,6 +32,7 @@ FIELDS = [
     "status", "error_type", "error_message", "total_seconds",
     "state_preparation_seconds", "transpile_seconds", "simulation_seconds",
     "post_processing_seconds", "max_abs_difference_vs_classical",
+    "stateprep_rounding_digits", "stateprep_max_abs_perturbation",
     "edge_npy", "gradient_npz",
 ]
 
@@ -110,10 +111,16 @@ def main() -> None:
     if CSV_PATH.exists():
         with CSV_PATH.open("r", newline="", encoding="utf-8") as stream:
             reader = csv.DictReader(stream)
-            if reader.fieldnames != FIELDS:
+            if not set(reader.fieldnames or ()).issubset(FIELDS):
                 raise ValueError(f"Unexpected Step A CSV columns in {CSV_PATH}")
             for row in reader:
-                done[row["image_id"]] = row
+                done[row["image_id"]] = {field: row.get(field, "") for field in FIELDS}
+        temp_csv = CSV_PATH.with_suffix(".csv.tmp")
+        with temp_csv.open("w", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(stream, fieldnames=FIELDS)
+            writer.writeheader()
+            writer.writerows(done.values())
+        os.replace(temp_csv, CSV_PATH)
 
     pending = []
     for path in paths:
@@ -123,7 +130,7 @@ def main() -> None:
         if not (prior and prior["status"] == "ok" and edge_path.exists() and grad_path.exists()):
             pending.append(path)
     if pending:
-        warm_image, _, _ = load_gray_center_crop(pending[0])
+        warm_image, _ = load_gray_center_crop(pending[0])
         qhed_yao(warm_image, max_parallel_threads=THREADS)
 
     need_header = not CSV_PATH.exists() or CSV_PATH.stat().st_size == 0
@@ -168,6 +175,11 @@ def main() -> None:
                     "simulation_seconds": f"{result.timings['simulation_s']:.6f}",
                     "post_processing_seconds": f"{result.timings['post_processing_s']:.6f}",
                     "max_abs_difference_vs_classical": f"{np.max(np.abs(result.edge_map-reference)):.12g}",
+                    "stateprep_rounding_digits": "/".join(
+                        str(value) if value is not None else "none"
+                        for value in result.stateprep_rounding_digits
+                    ),
+                    "stateprep_max_abs_perturbation": f"{result.stateprep_max_abs_perturbation:.12g}",
                 })
             except Exception as exc:
                 row["error_type"] = type(exc).__name__
@@ -176,6 +188,12 @@ def main() -> None:
             stream.flush()
             done[image_id] = row
             print(f"{image_id}: {row['status']} {row['total_seconds']}s", flush=True)
+    temp_csv = CSV_PATH.with_suffix(".csv.tmp")
+    with temp_csv.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=FIELDS)
+        writer.writeheader()
+        writer.writerows(done.values())
+    os.replace(temp_csv, CSV_PATH)
     print(f"Image IDs: {', '.join(path.stem for path in paths)}")
     print(f"CSV: {CSV_PATH}")
     print(f"Edge maps: {EDGE_DIR}")

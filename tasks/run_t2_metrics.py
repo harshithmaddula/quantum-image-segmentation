@@ -398,14 +398,31 @@ def main() -> None:
                 "times": [float(row["total_seconds"]) for row in method_rows],
             }
         _write_csv(csv_path, rows_by_key, fields)
+        qhed_times_by_id = {}
+        qhed_csv_path = OUT / "per_image_qhed.csv"
+        if qhed_csv_path.exists():
+            with qhed_csv_path.open("r", newline="", encoding="utf-8") as stream:
+                for row in csv.DictReader(stream):
+                    if (row.get("image_id") in completed_ids and row.get("status") == "ok"
+                            and row.get("total_seconds")):
+                        qhed_times_by_id[row["image_id"]] = float(row["total_seconds"])
+        qhed_runtime = [qhed_times_by_id[image_id] for image_id in completed_ids
+                        if image_id in qhed_times_by_id]
         summary = {
-            "label": "PILOT" if args.pilot else "FULL RUN",
+            "label": ("PILOT" if args.pilot else
+                      "FULL RUN" if len(completed_ids) == args.limit else "PARTIAL RUN"),
             "evaluation": "BSDS500 validation; center crop 256x256; QHED/Sobel/Canny; no interpolation of GT",
             "images": completed_ids,
+            "requested_images": 1 if args.pilot else args.limit,
+            "completed_images": len(completed_ids),
             "tuning": tuning,
             "tuning_seconds_this_invocation": tuning_seconds,
             "tolerance_pixels": tolerance,
             "threshold_count": N_THRESHOLDS,
+            "timing_scope": {
+                "QHED": "Step A total_seconds: both directional QHED scans including state preparation, transpilation, simulation, and postprocessing; excludes image loading and cache writes.",
+                "Sobel/Canny": "Step B total_seconds: edge-map generation, 99-threshold boundary sweep, and localization at the ODS threshold; excludes training-set tuning and unreported warm-up.",
+            },
             "methods": {},
         }
         for method, values in summary_rows.items():
@@ -419,6 +436,13 @@ def main() -> None:
                 "p95_seconds_per_image": float(np.percentile(times, 95, method="linear")),
                 "n": int(times.size),
             }
+        if "QHED" in summary["methods"] and qhed_runtime:
+            qhed_times = np.asarray(qhed_runtime, dtype=float)
+            summary["methods"]["QHED"].update({
+                "mean_seconds_per_image": float(np.mean(qhed_times)),
+                "p95_seconds_per_image": float(np.percentile(qhed_times, 95, method="linear")),
+                "n": int(qhed_times.size),
+            })
         result_path = OUT / ("pilot_metrics.json" if args.pilot else "metrics_summary.json")
         result_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
         if not args.pilot:
@@ -435,14 +459,16 @@ def main() -> None:
                 table_rows.append([method, f"{values['ods']:.4f}", f"{values['ois']:.4f}",
                                    f"{values['pratt_mean']:.4f}",
                                    f"{values['h95_median']:.3f}"])
-                times = np.asarray(values["times"], dtype=float)
+                times = np.asarray(
+                    qhed_runtime if method == "QHED" else values["times"], dtype=float
+                )
                 timing_rows.append([method, f"{np.mean(times):.4f}",
                                     f"{np.percentile(times, 95, method='linear'):.4f}",
                                     str(times.size)])
             report = [
                 "# T2: QHED on BSDS500 validation",
                 "",
-                "Full-run metrics use the first 30 validation images in sorted filename order, center-cropped to 256x256. Ground-truth boundary maps are center-cropped without interpolation.",
+                "This run uses the first 30 validation images in sorted filename order, center-cropped to 256x256. The `FULL RUN` label means all 30 requested images, not the entire BSDS500 validation split. Ground-truth boundary maps are center-cropped without interpolation.",
                 f"Baseline tuning used {tuning['training_images_used']} BSDS500 training images only; see `baseline_tuning.json` for the grid and chosen parameters.",
                 f"Matching tolerance: {tolerance:.6f} pixels (0.0075 x 256x256 diagonal); thresholds: {N_THRESHOLDS} evenly spaced values from 0.01 to 1.0.",
                 "Precision matches predictions to any annotator; recall accumulates matches separately over all annotators. Pratt is averaged over annotators per image; H95 is median over annotators per image, then median over images. Empty conventions are documented in `tasks/ASSUMPTIONS.md`.",
@@ -458,7 +484,12 @@ def main() -> None:
             report += ["", "| Method | Mean seconds/image | P95 seconds/image | n |",
                        "|---|---:|---:|---:|"]
             report += [f"| {r[0]} | {r[1]} | {r[2]} | {r[3]} |" for r in timing_rows]
-            report += ["", "See `per_image_metrics.csv` for image-level values and resumable sweep counts."]
+            report += [
+                "",
+                "Runtime scope: QHED uses Step A `per_image_qhed.csv` totals for both directional scans, including state preparation, transpilation, simulation, and postprocessing; image loading and cache writes are excluded. Sobel and Canny use Step B totals for edge-map generation, the 99-threshold boundary sweep, and ODS-threshold localization (Pratt/H95); baseline tuning and the unreported warm-up are excluded.",
+                "",
+                "See `per_image_metrics.csv` for image-level values and resumable sweep counts.",
+            ]
             (OUT / "Table2.md").write_text("\n".join(report) + "\n", encoding="utf-8")
         print(json.dumps(summary, indent=2))
         print(f"Per-image CSV: {csv_path}")
