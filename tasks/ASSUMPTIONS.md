@@ -2,6 +2,13 @@
 
 This file records implementation choices where the brief leaves details open. Any reported task results should cite the applicable choices.
 
+## T1 NEQR resources
+
+- **Encoding:** 8-bit grayscale NEQR with `2n` position qubits plus 8 intensity qubits and no ancillas; the tested sizes are 8x8, 16x16, and 32x32 crops from `5.1.12.tiff`, `4.2.03.tiff`, and `boat.512.tiff`.
+- **Image preparation:** centered crops with no resize interpolation, converted to `uint8`.
+- **Qiskit transpilation:** basis `{cx,u}`, optimization level 1, transpiler seed 17, one process, no coupling map, and ancilla-free `noaux_v24` MCX synthesis. Reported gate count is transpiled `u+cx`; measurements, barriers, and state-save instructions are excluded. Depth is the transpiled circuit depth.
+- **Validation and timing:** Aer statevector decoding is checked for exact pixel recovery. The PennyLane comparison is only for `5.1.12.tiff` at 8x8. No unreported warm-up is used; each transpile timing is one call. Worker caps are 20 minutes and 10 GiB RSS; capped runs are not estimated or reported as completed.
+
 ## T2 QHED / BSDS500
 
 - **Paper-directed by the brief:** amplitude-encode normalized image data, append an auxiliary qubit, use Hadamard/controlled position shift/Hadamard, read the auxiliary `|1>` branch, scan horizontal and vertical directions, and combine to an edge magnitude.
@@ -16,3 +23,10 @@ This file records implementation choices where the brief leaves details open. An
 - **Empty-set conventions:** boundary F is 1 for empty prediction and empty annotations, otherwise 0 if either side is empty. Pratt FOM is 1 for empty-empty and 0 if exactly one side is empty. H95 is 0 for empty-empty and infinity if exactly one side is empty.
 - **Void pixels:** the available BSDS boundary maps are interpreted as binary boundaries; pixels not marked as boundary are treated as non-boundary. No void mask is inferred unless the loaded annotation data exposes one.
 - **Pilot image:** first filename in sorted BSDS500 validation JPG paths; center crop to 256x256 with no interpolation for the pilot image.
+
+## T3 QAOA MaxCut pilot
+
+- **Image and graph:** use a centered 128x128 grayscale crop from each USC-SIPI TIFF. Apply OpenCV SLIC to the grayscale image (replicated to three channels), targeting K=16; adjust region size only as needed to keep the actual superpixel count in [12, 20]. Each superpixel is one node, with its normalized mean grayscale intensity `mu_i`.
+- **Adjacency and weights:** connect superpixels sharing a 4-connected pixel boundary. Set `sigma` to the standard deviation of all node means, with `sigma=1` for the constant-image zero-variance case. Use `w_ij = 1 - exp(-(mu_i - mu_j)^2 / (2 sigma^2))` exactly, without an additive weight floor.
+- **Optimization and references:** use standard MaxCut QAOA with the X mixer; test p=1..4, five COBYLA restarts per depth, at most 50 optimizer iterations per restart, and 4,096 shots per objective evaluation. Compute the exact optimum by brute force over all `2^K` assignments. Otsu labels each superpixel by thresholding its mean against the image-level Otsu threshold.
+- **Final statistics and timing:** after selecting the best parameters, draw a separate 4,096-shot sample with a fresh simulator seed. Report the cut of the most frequent sampled bitstring and the mean cut over that sample, each divided by the exact optimum. Per-depth wall time includes transpilation, all restarts, and this final sample. The CSV is atomically updated after each image/depth row and successful rows are skipped on resume.
