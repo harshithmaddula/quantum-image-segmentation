@@ -44,7 +44,7 @@ FIELDS = [
 ]
 
 
-def build_slic_graph(image: np.ndarray) -> tuple[np.ndarray, list[tuple[int, int, float]], float]:
+def slic_partition(image: np.ndarray) -> tuple[np.ndarray, np.ndarray, int]:
     gray = np.clip(np.rint(image), 0, 255).astype(np.uint8)
     bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
     target_region_size = max(4, int(round(np.sqrt(gray.size / K_DEFAULT))))
@@ -72,7 +72,11 @@ def build_slic_graph(image: np.ndarray) -> tuple[np.ndarray, list[tuple[int, int
     if not candidates:
         raise ValueError(f"SLIC did not produce K in [{K_MIN}, {K_MAX}]")
     _, _, labels, n_nodes = min(candidates, key=lambda item: (item[0], item[1]))
+    return gray, labels, n_nodes
 
+
+def build_slic_graph(image: np.ndarray) -> tuple[np.ndarray, list[tuple[int, int, float]], float]:
+    gray, labels, n_nodes = slic_partition(image)
     flat_labels = labels.ravel()
     counts = np.bincount(flat_labels, minlength=n_nodes).astype(np.float64)
     means = np.bincount(flat_labels, weights=gray.ravel(), minlength=n_nodes) / counts / 255.0
