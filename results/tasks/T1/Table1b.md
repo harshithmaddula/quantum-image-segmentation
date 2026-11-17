@@ -2,6 +2,7 @@
 
 Each pixel is decoded as the most frequent sampled intensity at its position; unsampled positions are set to zero and count as unrecovered. Coverage is the fraction of positions sampled at least once. Fidelity is classical Bhattacharyya fidelity `(sum_x sqrt(p_x q_x))^2` between the ideal and empirical computational-basis measurement distributions; it is not quantum-state fidelity. PSNR uses 8-bit intensities and the full image, including unsampled positions.
 For 8x8 and 16x16, each shot count is a nested prefix of one 100,000-shot Aer sample per image/size. For 32x32, samples are drawn directly from the exact ideal measurement distribution; Phase 1 verified exact NEQR decodes for all three 32x32 circuits. The exact-distribution sampling is not an Aer circuit run.
+For a noiseless uniform position register with `N` positions, the high-shot classical fidelity follows the approximation `1 - (N - 1) / (4 x shots)`; at low shot counts, finite occupancy and unsampled positions cause larger deviations.
 
 | Image | Size | Shots | Classical fidelity | Exact pixels / all | Coverage | PSNR (dB) | Sampling method |
 |---|---:|---:|---:|---:|---:|---:|---|
@@ -35,11 +36,13 @@ For 8x8 and 16x16, each shot count is a nested prefix of one 100,000-shot Aer sa
 
 ## Noisy 8x8 Run
 
-Circuit: `5.1.12.tiff`, 8x8 (the canonical T1 timing image). The 8-shot single-run probe took 11.306396 s (1.413299 s/shot); the capped sampling run used 191 shots in 1201.02 s, including a 1.02 s overrun while the final batch completed. The target budget was 1,200 s. Depolarizing error was applied after each transpiled `u` (p1=0.001) and `cx` (p2=0.01). The gate-count estimate of error-free probability is 2.75e-201.
+Circuit: `5.1.12.tiff`, 8x8 (the canonical T1 timing image). The 8-shot single-run probe took 11.306396 s (1.413299 s/shot); the capped sampling run used 191 shots in 1201.02 s, including a 1.02 s overrun while the final batch completed, or about 6.29 s/shot. The target budget was 1,200 s. Depolarizing error was applied after each transpiled `u` (p1=0.001) and `cx` (p2=0.01). The gate-count estimate of error-free probability is 2.75e-201.
 
 | Image | Size | Shots | Classical fidelity | Exact pixels / all | Coverage | PSNR (dB) | Status |
 |---|---:|---:|---:|---:|---:|---:|---|
 | 5.1.12.tiff | 8x8 | 191 | 0.000082 | 0.000000 | 0.859375 | 3.506075 | computed |
+
+The observed noisy coverage (0.859375) is below the 0.950606 expected from 191 independent uniform position draws. The cause was not diagnosed; depolarizing circuit noise may bias position probabilities, and finite sampling variation is also possible. No uniformity test was performed. The 8-shot probe's higher per-shot time is consistent with fixed job/startup overhead being amortized over longer runs and Aer processing larger shot batches more efficiently, but these runs do not isolate the cause or establish a parallelization speedup.
 
 Noisy 16x16 and 32x32 were not computed. Error-free probability estimates below use `(1-p1)^N_u (1-p2)^N_cx` from the saved transpiled u/CX counts; no other noisy metrics are estimated.
 
