@@ -1,0 +1,76 @@
+{
+  "label": "PILOT",
+  "evaluation": "BSDS500 validation; center crop 256x256; QHED/Sobel/Canny; no interpolation of GT",
+  "images": [
+    "101085"
+  ],
+  "tuning": {
+    "tuning_split": "BSDS500 train only",
+    "training_images_used": 10,
+    "tolerance_pixels": 2.7152900397563426,
+    "n_thresholds_for_sobel": 99,
+    "sobel_grid_kernel_size": [
+      3,
+      5,
+      7
+    ],
+    "canny_grid_low": [
+      25,
+      50,
+      75
+    ],
+    "canny_grid_high": [
+      100,
+      150,
+      200,
+      225
+    ],
+    "sobel": {
+      "kernel_size": 7,
+      "threshold": 0.2019387755102041,
+      "train_ods": 0.5621520288026398,
+      "train_ois": 0.5833406463862778
+    },
+    "canny": {
+      "low": 75,
+      "high": 225,
+      "train_f": 0.513452219210905,
+      "train_ois": 0.490436221753442
+    }
+  },
+  "tuning_seconds_this_invocation": 0.00027689989656209946,
+  "tolerance_pixels": 2.7152900397563426,
+  "threshold_count": 99,
+  "methods": {
+    "QHED": {
+      "ODS": 0.6921703326229374,
+      "OIS": 0.6921703326229374,
+      "Pratt_FOM_mean": 0.50208212,
+      "H95_median_over_images": 24.3586878,
+      "F_at_ODS_threshold_mean": null,
+      "mean_seconds_per_image": 1.23858,
+      "p95_seconds_per_image": 1.23858,
+      "n": 1
+    },
+    "Sobel": {
+      "ODS": 0.7224084525164277,
+      "OIS": 0.7224084525164277,
+      "Pratt_FOM_mean": 0.5763233,
+      "H95_median_over_images": 31.0,
+      "F_at_ODS_threshold_mean": 0.6724936446612332,
+      "mean_seconds_per_image": 1.238854,
+      "p95_seconds_per_image": 1.238854,
+      "n": 1
+    },
+    "Canny": {
+      "ODS": 0.4315714969819891,
+      "OIS": 0.4315714969819891,
+      "Pratt_FOM_mean": 0.24358502,
+      "H95_median_over_images": 46.04345773,
+      "F_at_ODS_threshold_mean": 0.4315714969819891,
+      "mean_seconds_per_image": 1.243975,
+      "p95_seconds_per_image": 1.243975,
+      "n": 1
+    }
+  }
+}

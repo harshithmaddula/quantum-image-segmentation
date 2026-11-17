@@ -1,0 +1,111 @@
+{
+  "label": "FULL RUN",
+  "evaluation": "BSDS500 validation; center crop 256x256; QHED/Sobel/Canny; no interpolation of GT",
+  "images": [
+    "101085",
+    "101087",
+    "102061",
+    "103070",
+    "105025",
+    "106024",
+    "108005",
+    "108070",
+    "108082",
+    "109053",
+    "119082",
+    "12084",
+    "123074",
+    "126007",
+    "130026",
+    "134035",
+    "14037",
+    "143090",
+    "145086",
+    "147091",
+    "148026",
+    "148089",
+    "156065",
+    "157055",
+    "159008",
+    "160068",
+    "16077",
+    "163085",
+    "167062",
+    "167083"
+  ],
+  "requested_images": 30,
+  "completed_images": 30,
+  "tuning": {
+    "tuning_split": "BSDS500 train only",
+    "training_images_used": 200,
+    "tolerance_pixels": 2.7152900397563426,
+    "n_thresholds_for_sobel": 99,
+    "sobel_grid_kernel_size": [
+      3,
+      5,
+      7
+    ],
+    "canny_grid_low": [
+      25,
+      50,
+      75
+    ],
+    "canny_grid_high": [
+      100,
+      150,
+      200,
+      225
+    ],
+    "sobel": {
+      "kernel_size": 7,
+      "threshold": 0.23224489795918368,
+      "train_ods": 0.5419170516806741,
+      "train_ois": 0.598531480571498
+    },
+    "canny": {
+      "low": 75,
+      "high": 225,
+      "train_f": 0.49446307407455586,
+      "train_ois": 0.519864750262295
+    }
+  },
+  "tuning_seconds_this_invocation": 0.0003877999261021614,
+  "tolerance_pixels": 2.7152900397563426,
+  "threshold_count": 99,
+  "timing_scope": {
+    "QHED": "Step A total_seconds: both directional QHED scans including state preparation, transpilation, simulation, and postprocessing; excludes image loading and cache writes.",
+    "Sobel/Canny": "Step B total_seconds: edge-map generation, 99-threshold boundary sweep, and localization at the ODS threshold; excludes training-set tuning and unreported warm-up."
+  },
+  "methods": {
+    "QHED": {
+      "ODS": 0.472322558714905,
+      "OIS": 0.5357184978583687,
+      "Pratt_FOM_mean": 0.2965679126666666,
+      "H95_median_over_images": 46.77698468,
+      "F_at_ODS_threshold_mean": null,
+      "mean_seconds_per_image": 81.04649986666665,
+      "p95_seconds_per_image": 89.5611792,
+      "n": 30
+    },
+    "Sobel": {
+      "ODS": 0.519925549238439,
+      "OIS": 0.5724274409701352,
+      "Pratt_FOM_mean": 0.3177120616666666,
+      "H95_median_over_images": 46.381906065,
+      "F_at_ODS_threshold_mean": 0.5376804135350085,
+      "mean_seconds_per_image": 1.0356061333333335,
+      "p95_seconds_per_image": 1.2976269999999999,
+      "n": 30
+    },
+    "Canny": {
+      "ODS": 0.4483573023755168,
+      "OIS": 0.4624697260878448,
+      "Pratt_FOM_mean": 0.23905822433333332,
+      "H95_median_over_images": 49.79893176,
+      "F_at_ODS_threshold_mean": 0.4624697260878448,
+      "mean_seconds_per_image": 1.1480508666666667,
+      "p95_seconds_per_image": 1.4089230499999996,
+      "n": 30
+    }
+  }
+}
